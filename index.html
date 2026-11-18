@@ -28,7 +28,7 @@ const key='vic1-hotspots-local-v1';let hotspots=Array.isArray(cfg.hotspots)?[...
 let markers=[];
 function setStatus(msg,error=false){$('loading').textContent=msg;$('loading').classList.toggle('error',error);}
 function size(){let w=vp.clientWidth,h=vp.clientHeight;renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix()}window.addEventListener('resize',size);size();
-function resetCamera(){camera.position.set(4,2.5,5);controls.target.set(0,0,0);controls.update()}$('reset').onclick=resetCamera;
+function resetCamera(){camera.position.set(4.9,3.15,7);controls.target.set(0,0,0);controls.update()}$('reset').onclick=resetCamera;
 function modelPositionClick(ev){const rect=renderer.domElement.getBoundingClientRect();pointer.x=((ev.clientX-rect.left)/rect.width)*2-1;pointer.y=-((ev.clientY-rect.top)/rect.height)*2+1;raycaster.setFromCamera(pointer,camera);return raycaster.intersectObject(modelGroup,true)[0]}
 renderer.domElement.addEventListener('click',ev=>{if(!placing||!model)return;const hit=modelPositionClick(ev);if(!hit){$('coordStatus').textContent='Click the actual timber surface, not the background.';return;}pending=modelGroup.worldToLocal(hit.point.clone());$('coordStatus').textContent=`Point selected: ${pending.toArray().map(x=>x.toFixed(3)).join(', ')}. Add a note and Save hotspot.`;$('saveHotspot').disabled=false;});
 function showTab(which){$('videoSection').hidden=which!=='video';$('interactiveSection').hidden=which!=='interactive';$('videoTab').classList.toggle('active',which==='video');$('interactiveTab').classList.toggle('active',which==='interactive');if(which==='interactive'&&cfg.rtiViewerUrl){if(!$('rtiFrameHolder').firstChild){let iframe=document.createElement('iframe');iframe.title='Interactive RTI viewer';iframe.loading='lazy';iframe.referrerPolicy='strict-origin-when-cross-origin';iframe.src=cfg.rtiViewerUrl;$('rtiFrameHolder').append(iframe);} }else if(which==='video'){$('rtiFrameHolder').replaceChildren();}}
@@ -43,6 +43,71 @@ $('place').onclick=()=>{placing=!placing;$('place').classList.toggle('active',pl
 $('saveHotspot').onclick=()=>{if(!pending)return;hotspots.push({title:$('hotName').value.trim()||`Hotspot ${hotspots.length+1}`,note:$('hotNote').value.trim(),media:$('hotType').value,position:pending.toArray().map(x=>Number(x.toFixed(5)))});saveLocal();refreshMarkers();pending=null;$('saveHotspot').disabled=true;$('coordStatus').textContent='Saved. Select another position or export JSON.'};
 $('copyHotspots').onclick=async()=>{const txt=JSON.stringify(hotspots,null,2);try{await navigator.clipboard.writeText(txt);$('coordStatus').textContent='Copied JSON. Paste into config.js hotspots.';}catch{$('coordStatus').textContent=txt}};
 $('clearLocal').onclick=()=>{localStorage.removeItem(key);hotspots=Array.isArray(cfg.hotspots)?[...cfg.hotspots]:[];refreshMarkers();$('coordStatus').textContent='Local markers cleared.'};
-async function load(){if(!cfg.objUrl){setStatus('Set objUrl in config.js to your public Cloudflare R2 OBJ file.');return;}setStatus('Downloading OBJ model. Large models can take time to parse.');const loader=new OBJLoader();loader.load(cfg.objUrl,obj=>{model=obj;obj.traverse(child=>{if(child.isMesh){child.material=new THREE.MeshStandardMaterial({color:0xb29675,roughness:0.94,metalness:0,side:THREE.DoubleSide});child.geometry.computeVertexNormals();}});let bounds=new THREE.Box3().setFromObject(obj);let size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());if(!Number.isFinite(size.length())||size.length()===0){setStatus('Model geometry appears empty.',true);return;}obj.position.sub(center);const scale=4/Math.max(size.x,size.y,size.z);obj.scale.setScalar(scale);modelGroup.add(obj);const finalBounds=new THREE.Box3().setFromObject(modelGroup);finalBounds.getCenter(controls.target);camera.position.copy(controls.target).add(new THREE.Vector3(4,2.8,5));controls.update();$('place').disabled=false;$('loading').hidden=true;refreshMarkers();},xhr=>{if(xhr.total)setStatus(`Loading OBJ: ${Math.round(xhr.loaded/xhr.total*100)}%`);},err=>{setStatus('Cannot load OBJ. Check the public URL and Cloudflare R2 CORS. '+String(err?.message||err),true);console.error(err);});}
+function geometryReport(obj){
+  let meshes=0, triangles=0, vertices=0, valid=0, invalid=0;
+  const bounds=new THREE.Box3();
+  obj.traverse(child=>{
+    if(!child.isMesh || !child.geometry)return;
+    meshes++;
+    const g=child.geometry;
+    const p=g.getAttribute('position');
+    if(!p)return;
+    vertices+=p.count;
+    triangles+=Math.floor((g.index?g.index.count:p.count)/3);
+    for(let i=0;i<p.count;i++){
+      const x=p.getX(i),y=p.getY(i),z=p.getZ(i);
+      if(Number.isFinite(x)&&Number.isFinite(y)&&Number.isFinite(z)){
+        bounds.expandByPoint(tempVec.set(x,y,z));valid++;
+      } else invalid++;
+    }
+  });
+  return {meshes,triangles,vertices,valid,invalid,bounds};
+}
+function geometrySummary(s){return `${s.meshes} mesh(es), ${s.triangles.toLocaleString()} triangles, ${s.valid.toLocaleString()} finite vertices` + (s.invalid?`, ${s.invalid} invalid vertices`:'');}
+async function load(){
+  if(!cfg.objUrl){setStatus('Set objUrl in config.js to your public Cloudflare R2 OBJ file.');return;}
+  setStatus('Downloading OBJ model. Large models can take time to parse.');
+  const loader=new OBJLoader();
+  loader.load(cfg.objUrl,obj=>{
+    try{
+      model=obj;
+      const stats=geometryReport(obj);
+      console.info('VIC1 OBJ geometry diagnostics:',geometrySummary(stats));
+      if(stats.triangles===0 || stats.valid===0 || stats.bounds.isEmpty()){
+        setStatus(`OBJ loaded, but no valid mesh surface was found (${geometrySummary(stats)}). Verify OBJ contains actual face lines (f ...) and inspect the browser console.`,true);
+        return;
+      }
+      const dims=stats.bounds.getSize(new THREE.Vector3());
+      const center=stats.bounds.getCenter(new THREE.Vector3());
+      const longest=Math.max(dims.x,dims.y,dims.z);
+      if(!Number.isFinite(longest) || longest<=1e-12){
+        setStatus(`OBJ geometry has zero or invalid dimensions (${geometrySummary(stats)}). This often means invalid coordinates or degenerate faces; open browser console for details.`,true);
+        console.error('Degenerate OBJ bounds:',stats.bounds);
+        return;
+      }
+      obj.traverse(child=>{
+        if(!child.isMesh)return;
+        child.material=new THREE.MeshStandardMaterial({color:0xb29675,roughness:0.94,metalness:0,side:THREE.DoubleSide});
+        const g=child.geometry;
+        if(g.getAttribute('position') && (!g.getAttribute('normal') || g.getAttribute('normal').count!==g.getAttribute('position').count))g.computeVertexNormals();
+      });
+      // Correct transform: subtract the CENTER IN ORIGINAL COORDINATES before scaling.
+      // Previously the center was subtracted after scaling, which could put the mesh offscreen.
+      const scale=4/longest;
+      obj.scale.setScalar(scale);
+      obj.position.copy(center).multiplyScalar(-scale);
+      modelGroup.add(obj);
+      controls.target.set(0,0,0);
+      const fitDistance=7;
+      camera.position.set(fitDistance*.7,fitDistance*.45,fitDistance);
+      camera.near=.01; camera.far=500; camera.updateProjectionMatrix();
+      controls.minDistance=.2; controls.maxDistance=60; controls.update();
+      window.__VIC1_MODEL_DIAGNOSTICS__={meshes:stats.meshes,triangles:stats.triangles,vertices:stats.vertices,invalid:stats.invalid,dimensions:dims.toArray(),scale};
+      $('place').disabled=false;
+      $('loading').hidden=true;
+      refreshMarkers();
+    }catch(e){console.error('VIC1 viewer geometry error',e);setStatus('OBJ downloaded, but model processing failed: '+String(e.message||e),true);}
+  },xhr=>{if(xhr.total)setStatus(`Loading OBJ: ${Math.round(xhr.loaded/xhr.total*100)}%`);},err=>{setStatus('Cannot load OBJ. Check the public URL and Cloudflare R2 CORS. '+String(err?.message||err),true);console.error(err);});
+}
 function frame(){requestAnimationFrame(frame);controls.update();const w=vp.clientWidth,h=vp.clientHeight;for(let i=0;i<markers.length;i++){const marker=markers[i],p=marker.hotspot.position;if(!Array.isArray(p)||p.length!==3){marker.classList.add('offscreen');continue;}tempVec.set(...p);modelGroup.localToWorld(tempVec);tempVec.project(camera);const visible=tempVec.z<1&&tempVec.z>-1&&Math.abs(tempVec.x)<=1&&Math.abs(tempVec.y)<=1;marker.classList.toggle('offscreen',!visible);if(visible){marker.style.left=(tempVec.x*.5+.5)*w+'px';marker.style.top=(-tempVec.y*.5+.5)*h+'px';}}renderer.render(scene,camera)}frame();load();
 </script></body></html>

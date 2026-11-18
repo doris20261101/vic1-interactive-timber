@@ -33,3 +33,11 @@ Hotspot coordinates are normalized to the automatically scaled and centered mode
 - RTI iframe may be refused by the RTI host's frame protection; in that case use an external link or host the viewer on your own site.
 - Large OBJ/MTL collections: this starter loads geometry with a default material. It does not load external MTL textures.
 - The browser may need significant RAM to parse a 67 MB text OBJ file.
+
+## This repaired version
+
+- Fixes the scaling/centering transform in the original template, which could place valid models outside the camera view.
+- Reports the number of meshes, triangles, and finite vertices when the model is loaded.
+- Does not claim to repair an OBJ whose geometry is missing or whose vertex coordinates are invalid.
+- Open browser Developer Tools > Console and look for `VIC1 OBJ geometry diagnostics` if loading still fails.
+- Keep hotspots only after you verify the corrected model orientation: existing marker coordinates may need re-positioning.
