@@ -1,16 +1,14 @@
-# VIC1 interactive timber viewer (OBJ + RTI + CT)
+# VIC1 interactive timber viewer (OBJ + interactive RTI + CT)
 
-A static site built with Three.js. It loads an OBJ from public Cloudflare R2, displays selectable hotspots, and supports both an RTI recording (MP4) and an interactive RTI viewer embedded in an iframe.
+A static site built with Three.js. It loads an OBJ from public Cloudflare R2, displays selectable hotspots, and includes an embedded interactive RTI viewer (no RTI animation/video).
 
 ## Configure
 
 Open `config.js` and paste:
 - `objUrl`: public OBJ URL, preferably the ~67 MiB simplified model. Cloudflare R2 CORS must permit your website origin.
-- `rtiVideoUrl`: public RTI video MP4 URL (optional)
 - `rtiViewerUrl`: **a complete publicly hosted OpenLIME viewer webpage URL**, not a raw `.rti` or `.ptm` file (optional).
 - `ctViewerUrl`: already points to your vtk.js VIC1 CT viewer.
 
-You can leave both RTI fields empty until you have the files. A video recording is not interactive RTI. For genuine interactive relighting, use the OpenLIME/Relight pipeline to convert the RTI into a web-compatible dataset and host a viewer page. See https://github.com/cnr-isti-vclab/openlime and https://github.com/cnr-isti-vclab/relight . You can host that viewer on a separate Vercel project and use its URL in `rtiViewerUrl`; iframe embedding requires the OpenLIME host to permit framing.
 
 ## Deploy
 
@@ -41,3 +39,6 @@ Hotspot coordinates are normalized to the automatically scaled and centered mode
 - Does not claim to repair an OBJ whose geometry is missing or whose vertex coordinates are invalid.
 - Open browser Developer Tools > Console and look for `VIC1 OBJ geometry diagnostics` if loading still fails.
 - Keep hotspots only after you verify the corrected model orientation: existing marker coordinates may need re-positioning.
+
+## RTI mode
+Only the interactive RTI iframe is present. RTI animation, MP4 player, and video-related configuration have been removed.
